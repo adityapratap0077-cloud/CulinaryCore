@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CulinaryCore: Premium Food & Recipe Platform</title>
+    <!-- Chosen Palette: "Midnight & Citrus" - A sophisticated dark theme with a deep charcoal background, off-white text, and a vibrant orange for primary actions and accents. -->
+    <!-- Application Structure Plan: The application is structured as a task-oriented SPA. The core user flows are: 1) Discovery (Homepage -> Search/Filter -> Recipe Detail), 2) Planning (Recipe Detail -> Add to Meal Planner -> View Shopping List), and 3) Contribution (Submit Recipe/Review). This structure prioritizes user actions over a rigid content hierarchy, making the platform a utility rather than just a content repository. A modal system is used for focused tasks like login and Pantry Chef to avoid navigating away from the user's current context. -->
+    <!-- Visualization & Content Choices: Data (recipes) is presented in interactive cards and lists. User engagement is visualized through star ratings and review counts. The Meal Planner uses a grid layout (HTML/CSS) for a clear weekly view. The Shopping List is an interactive checklist. All choices are made to support the core tasks of finding, planning, and cooking recipes, using Chart.js for potential future admin dashboards and custom HTML/CSS for all primary UI, adhering to the NO SVG/Mermaid rule. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/react@17/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,700;1,400&family=Poppins:wght@300;400;500&display=swap" rel="stylesheet">
+    <style>
+        body { 
+            font-family: 'Poppins', sans-serif; 
+            background-color: #121212;
+            color: #EAEAEA;
+        }
+        h1, h2, h3, h4, h5, h6 { font-family: 'Lora', serif; }
+        
+        #bg-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+        }
+
+        .glassmorphism {
+            background: rgba(18, 18, 18, 0.5);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .modal-enter { animation: fadeIn 0.3s ease-out; }
+        .page-enter { animation: fadeInUp 0.6s ease-out; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+
+        .card-3d {
+            transform-style: preserve-3d;
+            transition: transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94), box-shadow 0.5s;
+        }
+        .card-3d:hover {
+            transform: perspective(1000px) rotateY(3deg) rotateX(3deg) scale(1.05);
+            box-shadow: 0 25px 40px rgba(0,0,0,0.5), 0 0 40px rgba(255, 165, 0, 0.2);
+        }
+
+        .glow-button {
+            transition: box-shadow 0.3s ease-in-out, transform 0.3s ease-in-out;
+        }
+        .glow-button:hover {
+            box-shadow: 0 0 20px rgba(255, 165, 0, 0.7), 0 0 8px rgba(255, 165, 0, 0.9);
+            transform: translateY(-2px);
+        }
+
+        .parallax-bg {
+            background-attachment: fixed;
+            background-position: center;
+            background-repeat: no-repeat;
+            background-size: cover;
+            position: relative;
+            z-index: 0;
+        }
+
+        @media print {
+            body * { visibility: hidden; }
+            .print-area, .print-area * { visibility: visible; }
+            .print-area { position: absolute; left: 0; top: 0; width: 100%; }
+            @page { size: auto; margin: 0.5in; }
+        }
+        .filter-btn-active {
+            background-color: #FFA500 !important;
+            color: #121212 !important;
+            border-color: #FFA500 !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="aurora-background">
+        <div class="aurora-layer aurora-1"></div>
+        <div class="aurora-layer aurora-2"></div>
+        <div class="aurora-layer aurora-3"></div>
+    </div>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useMemo } = React;
+
+        // --- API & Data Configuration ---
+        const MEALDB_API_BASE = "https://www.themealdb.com/api/json/v1/1/";
+        
+        const transformMealDBRecipe = (meal) => {
+            if (!meal) return null;
+            let ingredients = [];
+            for (let i = 1; i <= 20; i++) {
+                const ingredient = meal[`strIngredient${i}`];
+                const measure = meal[`strMeasure${i}`];
+                if (ingredient && ingredient.trim() !== "") {
+                    ingredients.push({ name: ingredient, measure: measure });
+                }
+            }
+            return {
+                id: meal.idMeal,
+                author: meal.strSource ? new URL(meal.strSource).hostname.replace('www.','') : 'TheMealDB Community',
+                title: meal.strMeal,
+                description: meal.strInstructions,
+                imageUrl: meal.strMealThumb,
+                ingredients,
+                steps: meal.strInstructions ? meal.strInstructions.split('\r\n').filter(step => step && step.trim() !== "" && !step.match(/^STEP \d+$/)) : [],
+                category: meal.strCategory,
+                cuisine: meal.strArea,
+                rating: (Math.random() * (5 - 3.8) + 3.8).toFixed(1),
+                reviewCount: Math.floor(Math.random() * 150) + 10,
+                videoUrl: meal.strYoutube,
+                tags: meal.strTags ? meal.strTags.split(',') : [],
+                isPremium: Math.random() < 0.2 // Simulate 20% of recipes being premium
+            };
+        };
+
+        const callMealDBAPI = async (endpoint) => {
+            try {
+                const response = await fetch(`${MEALDB_API_BASE}${endpoint}`);
+                if (!response.ok) throw new Error(`TheMealDB API call failed`);
+                const data = await response.json();
+                return data.meals ? data.meals.map(transformMealDBRecipe) : [];
+            } catch (error) {
+                console.error("TheMealDB API Error:", error);
+                return [];
+            }
+        };
+
+        // --- User Data Management ---
+        const users = {
+            'adityapratap0077@gmail.com': {
+                password: 'Aditya@1235',
+                firstName: 'Aditya',
+                lastName: 'Pratap',
+                profileImageUrl: 'https://placehold.co/150x150/FFA500/121212?text=AP',
+                isAdmin: true,
+                isSubscribed: true,
+            },
+            'user@example.com': {
+                password: 'password123',
+                firstName: 'Regular',
+                lastName: 'User',
+                profileImageUrl: 'https://placehold.co/150x150/cccccc/121212?text=RU',
+                isAdmin: false,
+                isSubscribed: false,
+            }
+        };
+
+        const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+        // --- Main App Component ---
+        function App() {
+            const [page, setPage] = useState({ name: 'home', params: {} });
+            const [isMenuOpen, setIsMenuOpen] = useState(false);
+            const [currentUser, setCurrentUser] = useState(null);
+            const [recipeBox, setRecipeBox] = useState([]);
+            const [mealPlan, setMealPlan] = useState(() => daysOfWeek.reduce((acc, day) => ({...acc, [day]: null }), {}));
+            const [activeModal, setActiveModal] = useState(null);
+            const [userReviews, setUserReviews] = useState([]);
+
+            const navigateTo = (name, params = {}) => {
+                setPage({ name, params });
+                setIsMenuOpen(false);
+                window.scrollTo(0, 0);
+            };
+
+            const toggleRecipeInBox = (recipe) => {
+                if (!currentUser) { setActiveModal('login'); return; }
+                setRecipeBox(prev => prev.some(r => r.id === recipe.id) ? prev.filter(r => r.id !== recipe.id) : [...prev, recipe]);
+            };
+
+            const addRecipeToMealPlan = (day, recipe) => {
+                if (!currentUser) { setActiveModal('login'); return; }
+                setMealPlan(prev => ({...prev, [day]: recipe}));
+                alert(`${recipe.title} added to ${day}'s meal plan!`);
+            };
+
+            const handleAddReview = (review) => {
+                setUserReviews(prev => [review, ...prev]);
+            };
+
+            const handleLogout = () => {
+                setCurrentUser(null);
+                navigateTo('home');
+            }
+
+            const renderPage = () => {
+                const props = { navigateTo, currentUser, recipeBox, toggleRecipeInBox, setActiveModal, mealPlan, addRecipeToMealPlan, userReviews, handleAddReview };
+                return <div key={page.name} className="page-enter">{
+                    (() => {
+                        switch (page.name) {
+                            case 'home': return <HomePage {...props} />;
+                            case 'recipeDetail': return <RecipeDetailPage {...props} recipeId={page.params.id} />;
+                            case 'searchResults': return <SearchResultsPage {...props} initialParams={page.params} />;
+                            case 'userProfile': return <UserProfilePage {...props} />;
+                            case 'mealPlanner': return <MealPlannerPage {...props} />;
+                            case 'submitRecipe': return <SubmitRecipePage {...props} />;
+                            case 'admin': return currentUser?.isAdmin ? <AdminDashboardPage {...props} /> : <HomePage {...props} />;
+                            case 'premium': return <PremiumPage {...props} />;
+                            default: return <HomePage {...props} />;
+                        }
+                    })()
+                }</div>;
+            };
+
+            return (
+                <div className="bg-[#121212]">
+                    <Header navigateTo={navigateTo} isMenuOpen={isMenuOpen} setIsMenuOpen={setIsMenuOpen} currentUser={currentUser} handleLogout={handleLogout} setActiveModal={setActiveModal} />
+                    <main className="pt-20">
+                        {renderPage()}
+                    </main>
+                    <Footer />
+                    {activeModal === 'login' && <LoginModal onClose={() => setActiveModal(null)} setCurrentUser={setCurrentUser} />}
+                    {activeModal === 'premium' && <PremiumModal onClose={() => setActiveModal(null)} setCurrentUser={setCurrentUser} currentUser={currentUser} />}
+                    {activeModal === 'pantry' && <PantryChefModal onClose={() => setActiveModal(null)} />}
+                </div>
+            );
+        }
+        
+        // --- Core Components ---
+        const Header = ({ navigateTo, isMenuOpen, setIsMenuOpen, currentUser, handleLogout, setActiveModal }) => {
+            return (
+                <header className="glassmorphism fixed top-0 left-0 right-0 z-50">
+                    <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+                        <div className="flex justify-between items-center h-20">
+                            <div className="text-3xl font-bold text-[#EAEAEA] cursor-pointer" onClick={() => navigateTo('home')}>CulinaryCore</div>
+                            <nav className="hidden md:flex items-center gap-2">
+                                <a onClick={() => navigateTo('home')} className="px-4 py-2 text-gray-300 hover:text-white rounded-md cursor-pointer transition-colors">Home</a>
+                                <a onClick={() => navigateTo('searchResults')} className="px-4 py-2 text-gray-300 hover:text-white rounded-md cursor-pointer transition-colors">Recipes</a>
+                                <a onClick={() => navigateTo('premium')} className="px-4 py-2 text-orange-400 hover:text-orange-300 rounded-md cursor-pointer transition-colors font-semibold">Premium</a>
+                                <a onClick={() => currentUser ? navigateTo('mealPlanner') : setActiveModal('login')} className="px-4 py-2 text-gray-300 hover:text-white rounded-md cursor-pointer transition-colors flex items-center gap-2"><span role="img" aria-label="Calendar">📅</span> Meal Planner</a>
+                                <a onClick={() => currentUser ? navigateTo('submitRecipe') : setActiveModal('login')} className="px-4 py-2 text-gray-300 hover:text-white rounded-md cursor-pointer transition-colors">Submit Recipe</a>
+                                {currentUser?.isAdmin && <a onClick={() => navigateTo('admin')} className="px-4 py-2 text-amber-400 hover:text-amber-300 rounded-md cursor-pointer transition-colors">Admin</a>}
+                            </nav>
+                            <div className="hidden md:flex items-center space-x-2">
+                                {currentUser ? (
+                                    <>
+                                        <button onClick={() => navigateTo('userProfile')} className="p-2 rounded-full hover:bg-gray-700"><span role="img" aria-label="User">👤</span></button>
+                                        <button onClick={handleLogout} className="flex items-center gap-2 bg-gray-600 text-white px-4 py-2 rounded-full font-semibold hover:bg-gray-700 transition-colors"><span role="img" aria-label="Logout">⬅️</span> Logout</button>
+                                    </>
+                                ) : (
+                                    <button onClick={() => setActiveModal('login')} className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-full font-semibold hover:bg-orange-600 transition-colors glow-button"><span role="img" aria-label="Login">➡️</span> Login</button>
+                                )}
+                            </div>
+                            <div className="md:hidden"><button onClick={() => setIsMenuOpen(!isMenuOpen)}>{isMenuOpen ? '❌' : '☰'}</button></div>
+                        </div>
+                    </div>
+                    {isMenuOpen && (
+                        <div className="md:hidden bg-[#121212]/90 backdrop-blur-lg border-t border-gray-700"><nav className="flex flex-col items-center space-y-4 py-4">
+                            <a onClick={() => navigateTo('home')} className="text-gray-300 hover:text-white cursor-pointer">Home</a>
+                            <a onClick={() => navigateTo('searchResults')} className="text-gray-300 hover:text-white cursor-pointer">Recipes</a>
+                            <a onClick={() => navigateTo('premium')} className="text-orange-400 hover:text-orange-300 cursor-pointer">Premium</a>
+                            <a onClick={() => currentUser ? navigateTo('mealPlanner') : setActiveModal('login')} className="text-gray-300 hover:text-white cursor-pointer">Meal Planner</a>
+                            <a onClick={() => currentUser ? navigateTo('submitRecipe') : setActiveModal('login')} className="text-gray-300 hover:text-white cursor-pointer">Submit Recipe</a>
+                            {currentUser?.isAdmin && <a onClick={() => navigateTo('admin')} className="text-amber-400 hover:text-amber-300 cursor-pointer">Admin</a>}
+                            {currentUser && <a onClick={() => navigateTo('userProfile')} className="text-gray-300 hover:text-white cursor-pointer">Profile</a>}
+                            <button onClick={() => { currentUser ? handleLogout() : setActiveModal('login'); setIsMenuOpen(false); }} className="bg-orange-500 text-white px-4 py-2 rounded-full font-semibold">{currentUser ? 'Logout' : 'Login'}</button>
+                        </nav></div>
+                    )}
+                </header>
+            );
+        };
+
+        const Footer = () => (
+            <footer className="bg-transparent text-gray-400 mt-16 border-t border-gray-800"><div className="container mx-auto py-8 px-4 sm:px-6 lg:px-8 text-center">
+                <p className="text-2xl font-bold text-white mb-2">CulinaryCore</p>
+                <p>&copy; {new Date().getFullYear()} CulinaryCore. All Rights Reserved.</p>
+            </div></footer>
+        );
+
+        const RecipeCard = ({ recipe, navigateTo, setActiveModal, currentUser }) => {
+            const handleClick = () => {
+                if(recipe.isPremium && !currentUser?.isSubscribed) {
+                    setActiveModal('premium');
+                } else {
+                    navigateTo('recipeDetail', { id: recipe.id })
+                }
+            };
+            return (
+                <div className="bg-[#2a2a2a] rounded-xl shadow-lg overflow-hidden cursor-pointer group border border-gray-700 card-3d" onClick={handleClick}>
+                    <div className="relative"><img src={recipe.imageUrl} alt={recipe.title} className="w-full h-48 object-cover" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
+                        {recipe.isPremium && <div className="absolute top-2 right-2 bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full">PREMIUM</div>}
+                        <div className="absolute bottom-0 left-0 p-4"><h3 className="text-lg font-bold text-white leading-tight">{recipe.title}</h3></div>
+                    </div>
+                    <div className="p-4"><div className="flex justify-between items-center text-sm text-gray-400">
+                        <div className="flex items-center gap-1"><span role="img" aria-label="Star" className="text-orange-400">⭐</span><span>{recipe.rating}</span></div>
+                        <div className="flex items-center gap-1"><span role="img" aria-label="Chef Hat">👨‍🍳</span><span>{recipe.cuisine}</span></div>
+                        <div className="flex items-center gap-1"><span role="img" aria-label="Soup">🍲</span><span>{recipe.category}</span></div>
+                    </div></div>
+                </div>
+            );
+        };
+
+        // --- Page Components ---
+        const HomePage = ({ navigateTo, setActiveModal, currentUser }) => {
+            const [featuredRecipe, setFeaturedRecipe] = useState(null);
+            const [trendingRecipes, setTrendingRecipes] = useState([]);
+            const [premiumRecipes, setPremiumRecipes] = useState([]);
+            
+            useEffect(() => {
+                const fetchHomePageData = async () => {
+                    const results = await callMealDBAPI('search.php?s=b');
+                    setFeaturedRecipe(results[0]);
+                    setTrendingRecipes(results.slice(1, 5));
+                    setPremiumRecipes(results.filter(r => r.isPremium).slice(0, 4));
+                };
+                fetchHomePageData();
+            }, []);
+
+            if (!featuredRecipe) return <div className="text-center py-20 text-white">Loading...</div>;
+
+            return (
+                <div>
+                    <section className="relative container mx-auto px-4 sm:px-6 lg:px-8 py-20 text-center min-h-[60vh] flex flex-col justify-center">
+                        <div className="absolute inset-0 -z-10 parallax-bg" style={{backgroundImage: `url(${featuredRecipe.imageUrl})`, filter: 'blur(8px) brightness(0.4)'}}></div>
+                        <h1 className="text-5xl md:text-7xl font-bold text-white mb-4">Taste The World</h1>
+                        <p className="text-lg text-gray-300 mb-8 max-w-2xl mx-auto">Discover thousands of recipes from home cooks and professional chefs, curated for your palate.</p>
+                        <button onClick={() => navigateTo('searchResults')} className="bg-orange-500 text-white font-bold py-3 px-8 rounded-full hover:bg-orange-600 transition-transform hover:scale-105 glow-button mx-auto">Explore Recipes</button>
+                    </section>
+                    <section className="py-16 bg-[#1f1f1f]/50"><div className="container mx-auto px-4 sm:px-6 lg:px-8">
+                        <h2 className="text-3xl font-bold text-center text-white mb-8">Fan Favorites</h2>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+                            {trendingRecipes.map(recipe => <RecipeCard key={recipe.id} recipe={recipe} navigateTo={navigateTo} setActiveModal={setActiveModal} currentUser={currentUser} />)}
+                        </div>
+                    </div></section>
+                    <section className="py-16"><div className="container mx-auto px-4 sm:px-6 lg:px-8">
+                        <h2 className="text-3xl font-bold text-center text-white mb-8">Unlock Exclusive Premium Recipes</h2>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+                            {premiumRecipes.map(recipe => <RecipeCard key={recipe.id} recipe={recipe} navigateTo={navigateTo} setActiveModal={setActiveModal} currentUser={currentUser} />)}
+                        </div>
+                        <div className="text-center mt-12">
+                            <button onClick={() => navigateTo('premium')} className="bg-orange-500 text-white font-bold py-3 px-8 rounded-full hover:bg-orange-600 transition-transform hover:scale-105 glow-button mx-auto">View All Premium</button>
+                        </div>
+                    </div></section>
+                    <AboutSection />
+                </div>
+            );
+        };
+
+        const AboutSection = () => (
+            <section className="py-16"><div className="container mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+                    <div>
+                        <h2 className="text-3xl font-bold text-white mb-4">Our Culinary Philosophy</h2>
+                        <p className="text-gray-300 mb-4 leading-relaxed">At CulinaryCore, we believe that cooking should be a joyful and accessible experience for everyone. Our mission is to build a vibrant community where food lovers can discover, create, and share amazing recipes from all corners of the globe.</p>
+                        <p className="text-gray-300 leading-relaxed">We're more than just a recipe site; we're a platform dedicated to the art and science of cooking, empowering home cooks with the tools and inspiration they need to create memorable meals.</p>
+                    </div>
+                    <div className="rounded-xl overflow-hidden shadow-xl card-3d">
+                        <img src="https://images.unsplash.com/photo-1542010589005-d1eacc3918f2?q=80&w=2070&auto=format&fit=crop" alt="About Us" className="w-full h-full object-cover"/>
+                    </div>
+                </div>
+            </div></section>
+        );
+
+        const RecipeDetailPage = ({ recipeId, currentUser, recipeBox, toggleRecipeInBox, addRecipeToMealPlan, handleAddReview }) => {
+            const [recipe, setRecipe] = useState(null);
+            const [servings, setServings] = useState(4);
+            
+            useEffect(() => {
+                const fetchRecipe = async () => {
+                    const results = await callMealDBAPI(`lookup.php?i=${recipeId}`);
+                    setRecipe(results[0]);
+                };
+                fetchRecipe();
+            }, [recipeId]);
+            
+            if (!recipe) return <div className="text-center py-20 text-white">Loading Recipe...</div>;
+            
+            const isInRecipeBox = recipeBox.some(r => r.id === recipe.id);
+            
+            const scaleIngredient = (measure) => {
+                if(!measure) return '';
+                const baseServings = 4; // Assuming a base of 4 for most recipes
+                const ratio = servings / baseServings;
+                const parts = measure.split(' ');
+                let newMeasure = '';
+                parts.forEach(part => {
+                    if(!isNaN(part)) {
+                        newMeasure += (parseFloat(part) * ratio).toFixed(2).replace(/\.00$/, '') + ' ';
+                    } else if (part.includes('/')) {
+                        const [num, den] = part.split('/');
+                        if(!isNaN(num) && !isNaN(den)) {
+                           newMeasure += ((parseFloat(num) / parseFloat(den)) * ratio).toFixed(2).replace(/\.00$/, '') + ' ';
+                        } else {
+                           newMeasure += part + ' ';
+                        }
+                    }
+                    else {
+                        newMeasure += part + ' ';
+                    }
+                });
+                return newMeasure.trim();
+            };
+
+            return (
+                <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                    <div className="print-area max-w-4xl mx-auto bg-[#2a2a2a] rounded-lg shadow-xl overflow-hidden border border-gray-700">
+                        <div className="relative">
+                            <img src={recipe.imageUrl} alt={recipe.title} className="w-full h-96 object-cover" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent"></div>
+                            <div className="absolute bottom-0 left-0 p-8">
+                                <h1 className="text-4xl font-bold text-white">{recipe.title}</h1>
+                                <p className="text-lg text-gray-300">From {recipe.author}</p>
+                            </div>
+                        </div>
+                        <div className="p-8">
+                            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-gray-300 mb-6">
+                                <div className="flex items-center"><span role="img" aria-label="Star" className="text-orange-400">⭐</span> {recipe.rating} ({recipe.reviewCount} reviews)</div>
+                                <div className="flex items-center"><span role="img" aria-label="Chef Hat">👨‍🍳</span> {recipe.cuisine}</div>
+                                <div className="flex items-center"><span role="img" aria-label="Soup">🍲</span> {recipe.category}</div>
+                            </div>
+                            <p className="text-lg text-gray-300 mb-8">{recipe.description.substring(0, 400)}...</p>
+                            <div className="flex flex-wrap gap-4 mb-8">
+                                <button onClick={() => toggleRecipeInBox(recipe)} className={`flex items-center px-6 py-3 rounded-full font-semibold transition-colors ${isInRecipeBox ? 'bg-pink-600 text-white hover:bg-pink-700' : 'bg-gray-600 text-white hover:bg-gray-500'}`}><span role="img" aria-label="Heart">❤️</span> {isInRecipeBox ? 'Saved!' : 'Save Recipe'}</button>
+                                <button onClick={() => window.print()} className="flex items-center bg-gray-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-gray-500 transition-colors"><span role="img" aria-label="Printer">🖨️</span> Print</button>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                                <div className="md:col-span-1">
+                                    <h2 className="text-2xl font-bold border-b-2 border-orange-500 pb-2 mb-4 text-white">Ingredients</h2>
+                                    <div className="flex items-center mb-4"><label className="mr-2 font-semibold text-gray-300">Servings:</label>
+                                        <button onClick={() => setServings(s => Math.max(1, s - 1))} className="p-1 rounded-full bg-gray-600 hover:bg-gray-500 text-white">－</button>
+                                        <input type="number" value={servings} onChange={(e) => setServings(parseInt(e.target.value, 10) || 1)} className="w-12 text-center font-bold mx-2 border-none bg-transparent text-white" />
+                                        <button onClick={() => setServings(s => s + 1)} className="p-1 rounded-full bg-gray-600 hover:bg-gray-500 text-white">＋</button>
+                                    </div>
+                                    <ul className="space-y-2 text-gray-300">{recipe.ingredients.map((ing, i) => <li key={i}><strong>{scaleIngredient(ing.measure)}</strong> {ing.name}</li>)}</ul>
+                                </div>
+                                <div className="md:col-span-2">
+                                    <h2 className="text-2xl font-bold border-b-2 border-orange-500 pb-2 mb-4 text-white">Instructions</h2>
+                                    <ol className="space-y-6">{recipe.steps.map((step, i) => <li key={i} className="flex"><span className="bg-orange-500 text-black rounded-full w-8 h-8 flex items-center justify-center font-bold mr-4 flex-shrink-0">{i + 1}</span><p className="text-gray-300 leading-relaxed">{step}</p></li>)}</ol>
+                                </div>
+                            </div>
+                            {recipe.videoUrl && <div className="mt-12"><h2 className="text-2xl font-bold border-b-2 border-orange-500 pb-2 mb-4 text-white">Video Tutorial</h2><iframe className="w-full aspect-video rounded-lg" src={`https://www.youtube.com/embed/${recipe.videoUrl.split('v=')[1]}`} frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen></iframe></div>}
+                            <div className="mt-12">
+                                <h2 className="text-2xl font-bold border-b-2 border-orange-500 pb-2 mb-4 text-white">Add to Meal Plan</h2>
+                                <div className="flex flex-wrap gap-2">
+                                    {daysOfWeek.map(day => <button key={day} onClick={() => addRecipeToMealPlan(day, recipe)} className="bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium py-2 px-4 rounded-md">{day}</button>)}
+                                </div>
+                            </div>
+                            <ReviewSection recipe={recipe} isLoggedIn={!!currentUser} handleAddReview={handleAddReview} />
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+        
+        const SearchResultsPage = ({ navigateTo, initialParams = {} }) => {
+            const [searchQuery, setSearchQuery] = useState("");
+            const [results, setResults] = useState([]);
+            const [isLoading, setIsLoading] = useState(false);
+            const [error, setError] = useState(null);
+            const [activeDiet, setActiveDiet] = useState(initialParams.diet || null);
+
+            const dietaryFilters = {
+                'Vegetarian': [
+                    { name: 'Vegetarian', type: 'category', icon: '🌿' },
+                    { name: 'Pasta', type: 'category', icon: '🍝' },
+                    { name: 'Eggs', type: 'ingredient', icon: '🥚' },
+                    { name: 'Potatoes', type: 'ingredient', icon: '🥔' },
+                ],
+                'Vegan': [
+                    { name: 'Vegan', type: 'category', icon: '🌱' },
+                    { name: 'Tofu', type: 'ingredient', icon: '⬜' },
+                    { name: 'Lentils', type: 'ingredient', icon: '🫘' },
+                    { name: 'Broccoli', type: 'ingredient', icon: '🥦' },
+                ],
+                'Non-Vegetarian': [
+                    { name: 'Chicken', type: 'ingredient', icon: '🐔' },
+                    { name: 'Beef', type: 'ingredient', icon: '🐄' },
+                    { name: 'Pork', type: 'ingredient', icon: '🐖' },
+                    { name: 'Salmon', type: 'ingredient', icon: '🐟' },
+                    { name: 'Lamb', type: 'ingredient', icon: '🐑' },
+                    { name: 'Seafood', type: 'category', icon: '🦐' },
+                ]
+            };
+
+            const performSearch = useCallback(async (query, filterType) => {
+                if (!query) return;
+                setIsLoading(true);
+                setError(null);
+                let endpoint = '';
+                switch (filterType) {
+                    case 'ingredient': endpoint = `filter.php?i=${query}`; break;
+                    case 'category': endpoint = `filter.php?c=${query}`; break;
+                    case 'cuisine': endpoint = `filter.php?a=${query}`; break;
+                    default: endpoint = `search.php?s=${query}`; break;
+                }
+                
+                const fetchedResults = await callMealDBAPI(endpoint);
+                if (fetchedResults.length === 0) setError(`No recipes found for "${query}".`);
+                setResults(fetchedResults);
+                setIsLoading(false);
+            }, []);
+
+            useEffect(() => {
+                if (initialParams.query) {
+                    performSearch(initialParams.query, initialParams.type || 'search');
+                }
+            }, [initialParams, performSearch]);
+
+            const handleDietSelect = (diet) => {
+                setActiveDiet(diet);
+                setResults([]);
+                setError(null);
+            };
+
+            return (
+                <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                    <h1 className="text-4xl font-bold mb-2 text-center text-white">Explore Recipes</h1>
+                    <p className="text-center text-gray-400 mb-8">Find your next favorite meal by selecting a dietary preference below.</p>
+                    
+                    <div className="mb-8 p-4 bg-[#2a2a2a]/50 rounded-lg shadow-md border border-gray-700">
+                        <h3 className="text-lg font-semibold text-center mb-4 text-white">1. Choose your dietary preference</h3>
+                        <div className="flex flex-wrap justify-center gap-4">
+                            {Object.keys(dietaryFilters).map(diet => 
+                                <button key={diet} onClick={() => handleDietSelect(diet)} className={`flex items-center gap-2 bg-[#2a2a2a] shadow-md border border-gray-600 text-white px-6 py-3 rounded-full text-lg font-semibold hover:border-orange-500 transition-colors ${activeDiet === diet ? 'filter-btn-active' : ''}`}>{diet}</button>
+                            )}
+                        </div>
+                    </div>
+
+                    {activeDiet && (
+                        <div className="mb-8 p-4 bg-[#2a2a2a]/50 rounded-lg shadow-md border border-gray-700">
+                            <h3 className="text-lg font-semibold text-center mb-4 text-white">2. Select an ingredient or category</h3>
+                            <div className="flex flex-wrap justify-center gap-4">
+                                {dietaryFilters[activeDiet].map(filter => <button key={filter.name} onClick={() => performSearch(filter.name, filter.type)} className="flex items-center gap-2 bg-[#2a2a2a] shadow-md border border-gray-600 text-white px-4 py-2 rounded-full hover:bg-gray-700 hover:border-orange-500 transition-colors"><span role="img" aria-label="icon">{filter.icon}</span> {filter.name}</button>)}
+                            </div>
+                        </div>
+                    )}
+                    
+                    <div className="max-w-2xl mx-auto mb-8"><div className="flex items-center bg-[#2a2a2a] rounded-full shadow-lg p-2 border-2 border-gray-700 focus-within:border-orange-500">
+                        <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && performSearch(searchQuery, 'search')} placeholder="Or search by recipe name..." className="w-full bg-transparent p-2 text-white focus:outline-none" />
+                        <button onClick={() => performSearch(searchQuery, 'search')} className="bg-orange-500 text-white rounded-full p-3 hover:bg-orange-600"><span role="img" aria-label="Search">🔍</span></button>
+                    </div></div>
+                    
+                    {isLoading && <div className="text-center text-lg py-10 text-white">Searching...</div>}
+                    {error && <div className="text-center text-lg text-red-400 bg-red-900/50 p-4 rounded-lg">{error}</div>}
+                    
+                    {!isLoading && results.length > 0 && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+                            {results.map(recipe => <RecipeCard key={recipe.id} recipe={recipe} navigateTo={navigateTo} />)}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const MealPlannerPage = ({ navigateTo, mealPlan }) => {
+            const shoppingList = useMemo(() => {
+                const allIngredients = Object.values(mealPlan).filter(Boolean).flatMap(recipe => recipe.ingredients);
+                const aggregated = allIngredients.reduce((acc, ing) => {
+                    const key = ing.name.toLowerCase();
+                    if (!acc[key]) acc[key] = [];
+                    acc[key].push(ing.measure);
+                    return acc;
+                }, {});
+                return Object.entries(aggregated).map(([name, measures]) => ({ name, measures: measures.join(', ') }));
+            }, [mealPlan]);
+
+            return (
+                <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                    <h1 className="text-4xl font-bold mb-8 text-center text-white">Your Weekly Meal Plan</h1>
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        <div className="lg:col-span-2">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {daysOfWeek.map(day => (
+                                    <div key={day} className="bg-[#2a2a2a] p-4 rounded-lg shadow-md border border-gray-700">
+                                        <h3 className="font-bold text-lg mb-2 text-white">{day}</h3>
+                                        {mealPlan[day] ? (
+                                            <div className="cursor-pointer" onClick={() => navigateTo('recipeDetail', {id: mealPlan[day].id})}>
+                                                <img src={mealPlan[day].imageUrl} className="w-full h-32 object-cover rounded-md mb-2" />
+                                                <p className="font-semibold text-white">{mealPlan[day].title}</p>
+                                            </div>
+                                        ) : (
+                                            <div className="text-center text-gray-500 border-2 border-dashed border-gray-600 rounded-md p-8">
+                                                <p>No meal planned.</p>
+                                                <button onClick={() => navigateTo('searchResults')} className="text-sm text-orange-400 font-semibold mt-2">Add a recipe</button>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="lg:col-span-1">
+                            <div className="bg-[#2a2a2a] p-6 rounded-lg shadow-lg sticky top-24 border border-gray-700">
+                                <h2 className="text-2xl font-bold mb-4 flex items-center gap-2 text-white"><span role="img" aria-label="Shopping Cart">🛒</span> Shopping List</h2>
+                                {shoppingList.length > 0 ? (
+                                    <ul className="space-y-2 max-h-96 overflow-y-auto">
+                                        {shoppingList.map((item, i) => <li key={i} className="flex items-start text-gray-300"><input type="checkbox" className="mt-1.5 mr-3 h-5 w-5 rounded bg-gray-600 border-gray-500" /><span className="capitalize">{item.name} <span className="text-gray-500">({item.measures})</span></span></li>)}
+                                    </ul>
+                                ) : (
+                                    <p className="text-gray-500">Add recipes to your meal plan to generate a shopping list.</p>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+        
+        const UserProfilePage = ({ user, navigateTo, recipeBox, mealPlan, userReviews }) => {
+            const [activeTab, setActiveTab] = useState('box');
+            return (
+                <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                    <div className="bg-[#2a2a2a] p-8 rounded-lg shadow-lg mb-8 flex flex-col md:flex-row items-center gap-8 border border-gray-700">
+                        <img src={user.profileImageUrl} alt={user.username} className="w-36 h-36 rounded-full border-4 border-orange-500" />
+                        <div>
+                            <h1 className="text-4xl font-bold text-white">{user.firstName} {user.lastName}</h1>
+                            <p className="text-xl text-gray-400 mb-2">@{user.username}</p>
+                            {user.isSubscribed && <p className="text-sm font-bold text-orange-400 bg-orange-900/50 px-3 py-1 rounded-full inline-block">Premium Member</p>}
+                        </div>
+                    </div>
+                    <div className="border-b border-gray-700 mb-8">
+                        <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+                            <button onClick={() => setActiveTab('box')} className={`whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-lg ${activeTab === 'box' ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-400 hover:text-white hover:border-gray-500'}`}>Recipe Box</button>
+                            <button onClick={() => setActiveTab('plan')} className={`whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-lg ${activeTab === 'plan' ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-400 hover:text-white hover:border-gray-500'}`}>Meal Plan</button>
+                            <button onClick={() => setActiveTab('reviews')} className={`whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-lg ${activeTab === 'reviews' ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-400 hover:text-white hover:border-gray-500'}`}>My Reviews</button>
+                        </nav>
+                    </div>
+                    {activeTab === 'box' && (recipeBox.length > 0 ? <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">{recipeBox.map(recipe => <RecipeCard key={recipe.id} recipe={recipe} navigateTo={navigateTo} />)}</div> : <div className="text-center p-8 bg-[#2a2a2a] rounded-lg border border-gray-700"><h3 className="text-xl font-semibold text-white">Your Recipe Box is empty.</h3></div>)}
+                    {activeTab === 'plan' && <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">{Object.entries(mealPlan).map(([day, recipe]) => <div key={day} className="bg-[#2a2a2a] p-4 rounded-lg shadow-md border border-gray-700"><h3 className="font-bold text-lg mb-2 text-white">{day}</h3>{recipe ? <div><img src={recipe.imageUrl} className="w-full h-32 object-cover rounded-md mb-2" /><p className="font-semibold text-white">{recipe.title}</p></div> : <div className="text-center text-gray-500 p-8"><p>Empty</p></div>}</div>)}</div>}
+                    {activeTab === 'reviews' && (userReviews.length > 0 ? <div className="space-y-4">{userReviews.map((review, i) => <div key={i} className="bg-[#2a2a2a] p-4 rounded-lg shadow-md border border-gray-700"><h3 className="font-bold text-white">{review.recipe.title}</h3><div className="flex items-center my-2">{[...Array(5)].map((_, j) => <span key={j} className={`text-2xl ${j < review.rating ? 'text-orange-400' : 'text-gray-600'}`}>★</span>)}</div><p className="text-gray-300">{review.comment}</p></div>)}</div> : <div className="text-center p-8 bg-[#2a2a2a] rounded-lg border border-gray-700"><h3 className="text-xl font-semibold text-white">You haven't written any reviews yet.</h3></div>)}
+                </div>
+            );
+        };
+
+        const SubmitRecipePage = () => {
+             return (
+                <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                    <div className="max-w-3xl mx-auto bg-[#2a2a2a] p-8 rounded-lg shadow-xl border border-gray-700">
+                        <h1 className="text-4xl font-bold mb-8 text-center text-white">Submit Your Recipe</h1>
+                        <form className="space-y-6">
+                            <div><label htmlFor="title" className="block text-lg font-medium text-gray-300">Recipe Title</label><input type="text" id="title" className="mt-1 block w-full bg-gray-800 border-gray-600 text-white rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-lg p-2" /></div>
+                            <div><label htmlFor="description" className="block text-lg font-medium text-gray-300">Description</label><textarea id="description" rows="3" className="mt-1 block w-full bg-gray-800 border-gray-600 text-white rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-lg p-2"></textarea></div>
+                            <div className="text-center pt-4"><button type="submit" className="bg-orange-500 text-white font-bold py-3 px-8 rounded-full hover:bg-orange-600 transition-colors text-lg glow-button">Submit Recipe</button></div>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        const AdminDashboardPage = () => {
+            return <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8"><h1 className="text-4xl font-bold mb-8 text-center text-white">Admin Dashboard (Simulated)</h1><p className="text-center text-gray-300">This is where site analytics, content management, and user moderation tools would be displayed.</p></div>
+        }
+
+        const PremiumPage = ({ navigateTo, setActiveModal, currentUser }) => {
+            const [premiumRecipes, setPremiumRecipes] = useState([]);
+            const [isLoading, setIsLoading] = useState(true);
+
+            useEffect(() => {
+                const fetchPremium = async () => {
+                    const results = await callMealDBAPI('search.php?s=c');
+                    setPremiumRecipes(results.filter(r => r.isPremium));
+                    setIsLoading(false);
+                };
+                fetchPremium();
+            }, []);
+
+            return (
+                <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                    <div className="text-center mb-12">
+                        <h1 className="text-4xl font-bold text-white">Unlock a World of Flavor</h1>
+                        <p className="text-lg text-gray-400 mt-2">Subscribe to CulinaryCore Premium to access these exclusive recipes and more.</p>
+                    </div>
+                    {isLoading ? <div className="text-center text-white">Loading Premium Recipes...</div> : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+                            {premiumRecipes.map(recipe => <RecipeCard key={recipe.id} recipe={recipe} navigateTo={navigateTo} setActiveModal={setActiveModal} currentUser={currentUser} />)}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // --- Modals & AI Components ---
+        const LoginModal = ({ onClose, setCurrentUser }) => {
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [error, setError] = useState('');
+
+            const handleLogin = (e) => {
+                e.preventDefault();
+                const userAccount = users[email];
+                if (userAccount && userAccount.password === password) {
+                    setCurrentUser({ email, ...userAccount });
+                    onClose();
+                } else {
+                    setError('Invalid credentials. Please try again.');
+                }
+            };
+            return (
+                <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 modal-enter" onClick={onClose}>
+                    <div className="bg-[#2a2a2a]/80 backdrop-blur-lg rounded-lg shadow-2xl w-full max-w-md border border-gray-700" onClick={e => e.stopPropagation()}>
+                        <div className="p-6 border-b border-gray-700 flex justify-between items-center"><h2 className="text-2xl font-bold text-white">Login or Sign Up</h2><button onClick={onClose} className="p-1 rounded-full hover:bg-gray-700 text-white">❌</button></div>
+                        <form className="p-6" onSubmit={handleLogin}>
+                            {error && <p className="text-center text-red-400 bg-red-900/50 p-2 rounded-md mb-4">{error}</p>}
+                            <p className="text-center text-gray-400 mb-4">Enter your details to access your Recipe Box and Meal Planner.</p>
+                            <div className="mb-4"><label className="block font-semibold mb-1 text-gray-300">Email Address</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full p-2 bg-gray-800 border-gray-600 text-white rounded-md"/></div>
+                            <div className="mb-6"><label className="block font-semibold mb-1 text-gray-300">Password</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full p-2 bg-gray-800 border-gray-600 text-white rounded-md"/></div>
+                            <button type="submit" className="w-full bg-orange-500 text-white font-bold py-3 rounded-lg hover:bg-orange-600 glow-button">Login</button>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        const PremiumModal = ({ onClose, setCurrentUser, currentUser }) => {
+            const handleSubscribe = () => {
+                if(currentUser) {
+                    setCurrentUser(prev => ({...prev, isSubscribed: true}));
+                    onClose();
+                    alert("Thank you for subscribing! You now have access to all premium content.");
+                } else {
+                    alert("Please log in to subscribe.");
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 modal-enter" onClick={onClose}>
+                    <div className="bg-[#2a2a2a]/80 backdrop-blur-lg rounded-lg shadow-2xl w-full max-w-md text-center border border-gray-700" onClick={e => e.stopPropagation()}>
+                        <div className="p-6"><h2 className="text-2xl font-bold mb-4 text-white">Unlock Premium Content!</h2><p className="text-gray-300 mb-6">This recipe is part of our exclusive premium collection. Subscribe now to get access to this and hundreds of other special recipes, ad-free.</p><button onClick={handleSubscribe} className="w-full bg-orange-500 text-white font-bold py-3 rounded-lg hover:bg-orange-600 glow-button">Subscribe Now</button></div>
+                    </div>
+                </div>
+            );
+        };
+
+        const PantryChefModal = ({ onClose }) => {
+            return <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 modal-enter" onClick={onClose}><div className="bg-[#2a2a2a]/80 backdrop-blur-lg rounded-lg shadow-2xl w-full max-w-md text-center border border-gray-700" onClick={e => e.stopPropagation()}><div className="p-6"><h2 className="text-2xl font-bold mb-4 text-white">Pantry Chef</h2><p className="text-gray-300 mb-6">This AI-powered feature is coming soon! It will allow you to find recipes based on the ingredients you have at home.</p></div></div></div>
+        };
+        
+        const ReviewSection = ({ recipe, isLoggedIn, handleAddReview }) => {
+            const [userReview, setUserReview] = useState({ rating: 0, comment: '' });
+            const [reviews, setReviews] = useState([]);
+
+            const handleReviewSubmit = (e) => {
+                e.preventDefault();
+                if (!isLoggedIn) { alert("Please log in to submit a review."); return; }
+                if (userReview.rating === 0) { alert("Please select a star rating."); return; }
+                const newReview = { id: Date.now(), recipe, user: 'You', ...userReview, upvotes: 0, downvotes: 0 };
+                setReviews(prev => [newReview, ...prev]);
+                handleAddReview(newReview);
+                setUserReview({ rating: 0, comment: '' });
+            };
+
+            return (
+                <div className="mt-12">
+                    <h2 className="text-2xl font-bold border-b-2 border-orange-500 pb-2 mb-4 text-white">Reviews</h2>
+                    <form onSubmit={handleReviewSubmit} className="bg-[#3a3a3a]/50 p-4 rounded-lg mb-8 border border-gray-700">
+                        <h3 className="font-semibold text-lg mb-2 text-white">Write a Review</h3>
+                        <div className="flex items-center mb-2">{[...Array(5)].map((_, i) => <span key={i} onClick={() => setUserReview({...userReview, rating: i + 1})} className={`text-3xl cursor-pointer ${userReview.rating > i ? 'text-orange-400' : 'text-gray-600'}`}>★</span>)}</div>
+                        <textarea value={userReview.comment} onChange={e => setUserReview({...userReview, comment: e.target.value})} placeholder="Share your thoughts..." className="w-full p-2 bg-gray-800 border-gray-600 text-white rounded-md mb-2"></textarea>
+                        <button type="submit" className="bg-orange-500 text-white px-4 py-2 rounded-md font-semibold glow-button" disabled={!isLoggedIn}>Submit Review</button>
+                        {!isLoggedIn && <p className="text-sm text-red-400 mt-2">You must be logged in to submit a review.</p>}
+                    </form>
+                    <div className="space-y-6">
+                        {reviews.map((review) => <div key={review.id} className="bg-[#3a3a3a]/50 p-4 rounded-lg border border-gray-700"><div className="flex items-center mb-2"><div className="flex mr-2">{[...Array(5)].map((_, i) => <span key={i} className={`text-xl ${i < review.rating ? 'text-orange-500' : 'text-gray-600'}`}>★</span>)}</div><p className="font-semibold text-white">{review.user}</p></div><p className="text-gray-300">{review.comment}</p></div>)}
+                    </div>
+                </div>
+            );
+        };
+        
+        ReactDOM.render(React.createElement(App), document.getElementById('root'));
+    </script>
+</body>
+</html>
