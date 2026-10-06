@@ -1,3 +1,9 @@
+<p>
+  <a href="https://culinarycore.vercel.app"><img src="https://img.shields.io/badge/Live-Demo-brightgreen?style=flat-square" alt="Live Demo" /></a>
+  <img src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react" alt="React" />
+  <img src="https://img.shields.io/badge/Gemini-AI-4285F4?style=flat-square" alt="Gemini AI" />
+</p>
+
 # CulinaryCore: Premium Food & Recipe Platform
 
 A comprehensive web application that combines a modern culinary platform with authentication backend services. This project features a React-based frontend with glassmorphism design elements and a Node.js/Express backend for user authentication.
